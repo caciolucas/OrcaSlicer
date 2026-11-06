@@ -154,7 +154,7 @@ namespace {
 void send_page_loaded(StubWebView& view, const wxString& url)
 {
     wxWebViewEvent loaded(wxEVT_WEBVIEW_LOADED, view.GetId(), url, "");
-    view.ProcessEvent(loaded);
+    view.ProcessWindowEvent(loaded);
 }
 
 } // namespace
