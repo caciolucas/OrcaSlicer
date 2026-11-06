@@ -10,6 +10,7 @@
 #include <functional>
 #include <future>
 #include <ios>
+#include <stdexcept>
 #include <iterator>
 #include <memory>
 #include <mutex>
@@ -1206,4 +1207,88 @@ TEST_CASE("The agent opens a web page camera at the connected printer's address"
     CameraAgent agent(pctWebPage, "http://{host}:8000/", "192.168.1.20");
     CHECK(agent.get_camera_stream_mode() == CameraStreamMode::web_page);
     CHECK(agent.get_camera_url() == "http://192.168.1.20:8000/");
+}
+
+namespace {
+
+// Reports one PLA spool, or throws, without asking a printer
+class FilamentAgent : public MoonrakerPrinterAgent
+{
+public:
+    using MoonrakerPrinterAgent::MoonrakerPrinterAgent;
+    using MoonrakerPrinterAgent::box_refresh_requested;
+    using MoonrakerPrinterAgent::refresh_filament_info;
+    using MoonrakerPrinterAgent::update_status;
+    int  fetches = 0;
+    bool throws  = false;
+
+    bool fetch_filament_info(std::string, FilamentSyncMode) override
+    {
+        ++fetches;
+        if (throws)
+            throw std::runtime_error("the printer went away");
+        AmsTrayData tray;
+        tray.slot_index   = 0;
+        tray.tray_type    = "PLA";
+        tray.tray_color   = "FF0000";
+        tray.has_filament = true;
+        build_ams_payload(1, 3, {tray});
+        return true;
+    }
+};
+
+nlohmann::json box_with(const std::string& first_material, int humidity)
+{
+    return nlohmann::json::parse(R"({"T1":{"state":"connect","material_type":[")" + first_material +
+                                 R"(","-1","-1","-1"],"color_value":["0FF1E1E","-1","-1","-1"]},"humidity":)" +
+                                 std::to_string(humidity) + "}");
+}
+
+} // namespace
+
+TEST_CASE("A background filament read hands the machine update to the main thread", "[MoonrakerPrinterAgent][Filament]")
+{
+    FilamentAgent agent("");
+    std::vector<std::function<void()>> queued;
+    agent.set_queue_on_main_fn([&](std::function<void()> fn) { queued.push_back(std::move(fn)); });
+
+    // The machine belongs to the main thread, so the read only queues the update
+    CHECK(agent.refresh_filament_info("192.168.1.121:7125"));
+    CHECK(agent.fetches == 1);
+    CHECK(queued.size() == 1);
+}
+
+TEST_CASE("A failed background filament read is contained", "[MoonrakerPrinterAgent][Filament]")
+{
+    FilamentAgent agent("");
+    std::vector<std::function<void()>> queued;
+    agent.set_queue_on_main_fn([&](std::function<void()> fn) { queued.push_back(std::move(fn)); });
+    agent.throws = true;
+
+    bool found = true;
+    CHECK_NOTHROW(found = agent.refresh_filament_info("192.168.1.121:7125"));
+    CHECK_FALSE(found);
+    CHECK(queued.empty());
+}
+
+TEST_CASE("Only a change in the CFS slots asks for the filament system again", "[MoonrakerPrinterAgent][Filament]")
+{
+    FilamentAgent agent("");
+
+    // The subscription's status only records the slots
+    agent.update_status({{"box", box_with("000003", 40)}}, true);
+    CHECK_FALSE(agent.box_refresh_requested.load());
+
+    // Humidity changes without a spool changing
+    agent.update_status({{"box", {{"humidity", 41}}}}, false);
+    CHECK_FALSE(agent.box_refresh_requested.load());
+
+    // Another spool in the slot
+    agent.update_status({{"box", {{"T1", box_with("000001", 41).at("T1")}}}}, false);
+    CHECK(agent.box_refresh_requested.load());
+
+    // Updates without the box leave the request alone
+    agent.box_refresh_requested.store(false);
+    agent.update_status({{"print_stats", {{"state", "printing"}}}}, false);
+    CHECK_FALSE(agent.box_refresh_requested.load());
 }

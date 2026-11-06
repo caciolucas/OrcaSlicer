@@ -119,6 +119,7 @@ protected:
         std::chrono::milliseconds heartbeat{std::chrono::seconds(10)};      // Silence before the cached status is sent again
         std::chrono::milliseconds reconnect_delay{std::chrono::seconds(1)}; // First wait, doubling per consecutive failure up to 32x
         std::chrono::milliseconds storage_check{std::chrono::seconds(30)};  // How often the free space of the gcodes root is re-read
+        std::chrono::milliseconds filament_refresh{std::chrono::seconds(5)}; // Least time between filament re-reads a box change starts
     } ws_timings;
 
     // Tray data for AMS payload building
@@ -135,8 +136,23 @@ protected:
         int         nozzle_temp = 0;     // Optional
     };
 
-    // Build ams JSON and call parser
+    // Gives the machine's filament system these trays: now on the calling thread, or, during refresh_filament_info(),
+    // on the main thread, which owns the machine
     void build_ams_payload(int ams_count, int max_lane_index, const std::vector<AmsTrayData>& trays);
+    // The BBL-format payload DevFilaSystemParser reads for these trays
+    nlohmann::json ams_payload_json(int ams_count, int max_lane_index, const std::vector<AmsTrayData>& trays) const;
+    static void    apply_ams_payload(const std::string& dev_id, const std::string& model_id, bool has_storage,
+                                     const nlohmann::json& print_json);
+    // Reads the filament system off the GUI thread for the Device tab, without touching the project's filaments.
+    // Returns whether one was found; a failure is logged, never thrown, so the connection is unaffected.
+    bool refresh_filament_info(const std::string& dev_id);
+    // What a Creality box object holds in its slots, empty when it reports none; other box fields are left out
+    static std::string creality_box_signature(const nlohmann::json& box);
+    // Caches a status update. When it carries the box object, the subscription's first status only records what the
+    // slots hold; a later update that changes them asks the status stream to read the filament system again.
+    void update_status(const nlohmann::json& updates, bool subscription);
+    std::atomic<bool> box_refresh_requested{false}; // The box object's slots changed since the filament system was read
+    std::string       box_signature;                // creality_box_signature() of the cached box, under payload_mutex
     // Name shown for a filament unit, or empty for the AMS Lite name
     virtual std::string ams_unit_name(int /*ams_id*/) const { return {}; }
 

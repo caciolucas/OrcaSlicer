@@ -83,6 +83,9 @@
 
 namespace {
 
+// Set while refresh_filament_info() runs, so build_ams_payload() leaves the machine to the main thread
+thread_local bool publish_ams_on_main = false;
+
 namespace beast     = boost::beast;
 namespace http      = beast::http;
 namespace websocket = beast::websocket;
@@ -343,7 +346,9 @@ int MoonrakerPrinterAgent::connect_printer(const PrinterConnectionParams& params
     {
         std::lock_guard<std::recursive_mutex> lock(payload_mutex);
         status_cache = nlohmann::json::object();
+        box_signature.clear();
     }
+    box_refresh_requested.store(false);
     has_storage.store(false);
     ws_last_emit_ms.store(0);
     ws_last_dispatch_ms.store(0);
@@ -691,17 +696,30 @@ int MoonrakerPrinterAgent::set_queue_on_main_fn(QueueOnMainFn fn)
 
 void MoonrakerPrinterAgent::build_ams_payload(int ams_count, int max_lane_index, const std::vector<AmsTrayData>& trays)
 {
-
-    // Look up MachineObject via DeviceManager
-    auto* dev_manager = GUI::wxGetApp().getDeviceManager();
-    if (!dev_manager) {
+    nlohmann::json print_json = ams_payload_json(ams_count, max_lane_index, trays);
+    BOOST_LOG_TRIVIAL(info) << "MoonrakerPrinterAgent::build_ams_payload: Parsed " << trays.size() << " trays";
+    const std::string dev_id   = device_info.dev_id;
+    const std::string model_id = device_info.model_id;
+    const bool        storage  = has_storage.load();
+    if (!publish_ams_on_main) {
+        apply_ams_payload(dev_id, model_id, storage, print_json);
         return;
     }
-    MachineObject* obj = dev_manager->get_my_machine(device_info.dev_id);
-    if (!obj) {
+    QueueOnMainFn queue_fn;
+    {
+        std::lock_guard<std::recursive_mutex> lock(state_mutex);
+        queue_fn = queue_on_main_fn;
+    }
+    if (!queue_fn) {
+        BOOST_LOG_TRIVIAL(warning) << "MoonrakerPrinterAgent::build_ams_payload: no main thread queue, filament system left as it is";
         return;
     }
+    // Holds copies only, since the agent may be gone before the main thread runs it
+    queue_fn([dev_id, model_id, storage, print_json = std::move(print_json)] { apply_ams_payload(dev_id, model_id, storage, print_json); });
+}
 
+nlohmann::json MoonrakerPrinterAgent::ams_payload_json(int ams_count, int max_lane_index, const std::vector<AmsTrayData>& trays) const
+{
     // Build BBL-format JSON for DevFilaSystemParser::ParseV1_0
     nlohmann::json ams_json = nlohmann::json::object();
     nlohmann::json ams_array = nlohmann::json::array();
@@ -796,14 +814,27 @@ void MoonrakerPrinterAgent::build_ams_payload(int ams_count, int max_lane_index,
     // Wrap in the expected structure for ParseV1_0
     nlohmann::json print_json = nlohmann::json::object();
     print_json["ams"] = ams_json;
+    return print_json;
+}
+
+void MoonrakerPrinterAgent::apply_ams_payload(const std::string& dev_id, const std::string& model_id, bool has_storage,
+                                              const nlohmann::json& print_json)
+{
+    auto* dev_manager = GUI::wxGetApp().getDeviceManager();
+    if (!dev_manager) {
+        return;
+    }
+    MachineObject* obj = dev_manager->get_my_machine(dev_id);
+    if (!obj) {
+        return;
+    }
 
     // Call the parser to populate DevFilaSystem
     DevFilaSystemParser::ParseV1_0(print_json, obj, obj->GetFilaSystem().get(), false);
-    BOOST_LOG_TRIVIAL(info) << "MoonrakerPrinterAgent::build_ams_payload: Parsed " << trays.size() << " trays";
 
     // Set printer_type so update_sync_status() can match it against the preset's printer type.
     // Without this, the comparison fails and all sync badges are cleared.
-    obj->printer_type = device_info.model_id;
+    obj->printer_type = model_id;
 
     // Set push counters so is_info_ready() returns true for pull-mode agents.
     if (obj->m_push_count == 0) {
@@ -815,7 +846,7 @@ void MoonrakerPrinterAgent::build_ams_payload(int ams_count, int max_lane_index,
     obj->last_push_time = std::chrono::system_clock::now();
 
     // SelectMachineDialog blocks printing with "No SD card" unless the storage state is normal.
-    obj->GetStorage()->set_sdcard_state(has_storage.load() ? DevStorage::HAS_SDCARD_NORMAL : DevStorage::NO_SDCARD);
+    obj->GetStorage()->set_sdcard_state(has_storage ? DevStorage::HAS_SDCARD_NORMAL : DevStorage::NO_SDCARD);
 
     // Populate module_vers so is_info_ready() passes the version check.
     // Moonraker printers don't have BBL-style version info, but we need a non-empty map.
@@ -863,6 +894,50 @@ bool MoonrakerPrinterAgent::fetch_filament_info(std::string dev_id, FilamentSync
     // No MMU detected - this is normal for printers without MMU, not an error.
     BOOST_LOG_TRIVIAL(info) << "MoonrakerPrinterAgent::fetch_filament_info: No MMU system detected";
     return false;
+}
+
+bool MoonrakerPrinterAgent::refresh_filament_info(const std::string& dev_id)
+{
+    publish_ams_on_main = true;
+    const ScopeGuard reset([] { publish_ams_on_main = false; });
+    try {
+        return fetch_filament_info(dev_id);
+    } catch (const std::exception& e) {
+        BOOST_LOG_TRIVIAL(warning) << "MoonrakerPrinterAgent: reading the filament system failed: " << e.what();
+    } catch (...) {
+        BOOST_LOG_TRIVIAL(warning) << "MoonrakerPrinterAgent: reading the filament system failed";
+    }
+    return false;
+}
+
+std::string MoonrakerPrinterAgent::creality_box_signature(const nlohmann::json& box)
+{
+    if (!box.is_object())
+        return {};
+    nlohmann::json response;
+    response["result"]["status"]["box"] = box;
+    std::vector<CrealityCfsSlot> slots;
+    if (!parse_creality_cfs_response(response.dump(), slots))
+        return {};
+    std::string signature;
+    for (const CrealityCfsSlot& slot : slots)
+        signature += std::to_string(slot.slot_index) + ":" + slot.material_type + ":" + slot.color + ";";
+    return signature;
+}
+
+void MoonrakerPrinterAgent::update_status(const nlohmann::json& updates, bool subscription)
+{
+    std::lock_guard<std::recursive_mutex> lock(payload_mutex);
+    update_status_cache(updates);
+    if (!updates.is_object() || !updates.contains("box"))
+        return;
+    // The cache holds the whole box, an update only the fields that changed
+    const auto        cached    = status_cache.find("box");
+    const std::string signature = cached == status_cache.end() ? std::string() : creality_box_signature(*cached);
+    // why: the box also reports fields such as humidity, which change without a spool changing
+    if (!subscription && signature != box_signature)
+        box_refresh_requested.store(true);
+    box_signature = signature;
 }
 
 std::string MoonrakerPrinterAgent::trim_and_upper(const std::string& input)
@@ -1957,6 +2032,11 @@ void MoonrakerPrinterAgent::run_status_stream(std::string dev_id, std::string ba
                     subscribe_objects.insert("display_status");
                 }
 
+                // The Creality CFS reports its slots in box; a change there re-reads the filament system
+                if (this->available_objects.count("box") != 0) {
+                    subscribe_objects.insert("box");
+                }
+
                 for (const auto& name : this->available_objects) {
                     if (name == "extruder" || name.rfind("extruder", 0) == 0) {
                         subscribe_objects.insert(name);
@@ -1977,6 +2057,7 @@ void MoonrakerPrinterAgent::run_status_stream(std::string dev_id, std::string ba
                 refresh_storage(base_url, api_key);
             }
             auto last_storage_check = std::chrono::steady_clock::now();
+            std::chrono::steady_clock::time_point last_filament_refresh{};
 
             nlohmann::json subscribe;
             subscribe["jsonrpc"]   = "2.0";
@@ -2016,6 +2097,12 @@ void MoonrakerPrinterAgent::run_status_stream(std::string dev_id, std::string ba
                 if (ws_reconnect_requested.exchange(false)) {
                     connection_lost = true;
                     break;
+                }
+                // why: the printer is a small board, so a box that keeps changing is re-read at most once per filament_refresh
+                if (box_refresh_requested.load() && last_message - last_filament_refresh >= timings.filament_refresh && !ws_stop.load()) {
+                    box_refresh_requested.store(false);
+                    last_filament_refresh = last_message;
+                    refresh_filament_info(dev_id);
                 }
                 // Moonraker sends no free space updates, so they are re-read here; its proc stats arrive every second
                 if (last_message - last_storage_check >= timings.storage_check && !ws_stop.load()) {
@@ -2085,7 +2172,7 @@ void MoonrakerPrinterAgent::handle_ws_message(const std::string& dev_id, const s
 
     // Check for subscription response (has "result.status") - initial subscription is critical
     if (json.contains("result") && json["result"].contains("status") && json["result"]["status"].is_object()) {
-        update_status_cache(json["result"]["status"]);
+        update_status(json["result"]["status"], true);
         updated     = true;
         is_critical = true; // Initial subscription response - dispatch immediately
     }
@@ -2095,7 +2182,7 @@ void MoonrakerPrinterAgent::handle_ws_message(const std::string& dev_id, const s
         const std::string method = json["method"].get<std::string>();
         if (method == "notify_status_update" && json.contains("params") && json["params"].is_array() && !json["params"].empty() &&
             json["params"][0].is_object()) {
-            update_status_cache(json["params"][0]);
+            update_status(json["params"][0], false);
             updated = true;
             // Note: is_critical stays false for regular status updates (telemetry)
         } else if (method == "notify_klippy_ready") {
@@ -2623,13 +2710,21 @@ void MoonrakerPrinterAgent::perform_connection_async(const std::string& dev_id, 
     }
 
     if (result == BAMBU_NETWORK_SUCCESS) {
-        // Under connect_mutex, so a superseded connection never reports itself connected
-        std::lock_guard<std::recursive_mutex> lock(connect_mutex);
-        if (!is_stale()) {
-            dispatch_local_connect(ConnectStatusOk, dev_id, "0");
-            dispatch_printer_connected(dev_id);
-            BOOST_LOG_TRIVIAL(info) << "MoonrakerPrinterAgent: connect_printer completed - dev_id=" << dev_id;
+        bool connected = false;
+        {
+            // Under connect_mutex, so a superseded connection never reports itself connected
+            std::lock_guard<std::recursive_mutex> lock(connect_mutex);
+            if (!is_stale()) {
+                dispatch_local_connect(ConnectStatusOk, dev_id, "0");
+                dispatch_printer_connected(dev_id);
+                BOOST_LOG_TRIVIAL(info) << "MoonrakerPrinterAgent: connect_printer completed - dev_id=" << dev_id;
+                connected = true;
+            }
         }
+        // why: the Device tab shows the printer's filament system on its own, not only after a sync from Prepare.
+        // Read here, off the GUI thread; the connection already stands, whatever this finds.
+        if (connected && !is_stale())
+            refresh_filament_info(dev_id);
     } else if (result != BAMBU_NETWORK_ERR_CANCELED) {
         // Orca todo: revist here, for now don't send error, this is set current MachineObject to null
         // dispatch_local_connect(ConnectStatusFailed, dev_id, error_msg);
