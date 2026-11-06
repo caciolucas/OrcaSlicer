@@ -369,6 +369,11 @@ void PhysicalPrinterDialog::build_printhost_settings(ConfigOptionsGroup* m_optgr
     option.opt.width = Field::def_width_wider();
     m_optgroup->append_single_option_line(option);
 
+    m_optgroup->append_single_option_line("printer_camera_type");
+    option = m_optgroup->get_option("printer_camera_url");
+    option.opt.width = Field::def_width_wider();
+    m_optgroup->append_single_option_line(option);
+
     {
         // For bbl printers, we build a fake option to control whether the original device tab should be used
         ConfigOptionDef def;

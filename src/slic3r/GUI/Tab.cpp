@@ -5538,6 +5538,11 @@ void TabPrinter::build_fff()
             }
         }
 
+        optgroup->append_single_option_line("printer_camera_type");
+        option = optgroup->get_option("printer_camera_url");
+        option.opt.width = Field::def_width_wider();
+        optgroup->append_single_option_line(option);
+
         optgroup->append_single_option_line("use_3mf");
         optgroup->append_single_option_line("scan_first_layer" , "printer_basic_information_advanced#scan-first-layer");
         optgroup->append_single_option_line("enable_power_loss_recovery", "printer_basic_information_advanced#power-loss-recovery");

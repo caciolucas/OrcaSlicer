@@ -22,6 +22,7 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/algorithm/string/case_conv.hpp>
+#include <boost/algorithm/string/replace.hpp>
 #include <boost/algorithm/string/trim.hpp>
 #include <boost/asio/buffer.hpp>
 #include <boost/asio/connect.hpp>
@@ -537,6 +538,89 @@ bool MoonrakerPrinterAgent::accepts_3mf() const
     const PresetBundle*     bundle  = GUI::wxGetApp().preset_bundle;
     const ConfigOptionBool* use_3mf = bundle ? bundle->printers.get_edited_preset().config.option<ConfigOptionBool>("use_3mf") : nullptr;
     return use_3mf != nullptr && use_3mf->value;
+}
+
+MoonrakerPrinterAgent::CameraSettings MoonrakerPrinterAgent::camera_settings() const
+{
+    CameraSettings settings;
+    const PresetBundle* bundle = GUI::wxGetApp().preset_bundle;
+    if (bundle == nullptr)
+        return settings;
+    const DynamicPrintConfig& config = bundle->printers.get_edited_preset().config;
+    if (const auto* type = config.option<ConfigOptionEnum<PrinterCameraType>>("printer_camera_type"))
+        settings.type = type->value;
+    if (const auto* url = config.option<ConfigOptionString>("printer_camera_url"))
+        settings.url_template = url->value;
+    return settings;
+}
+
+std::string MoonrakerPrinterAgent::resolve_camera_url(const std::string& url_template, const std::string& host)
+{
+    const std::string url = boost::algorithm::trim_copy(url_template);
+    static const std::string placeholder = "{host}";
+    if (url.find(placeholder) == std::string::npos)
+        return url;
+
+    std::string address = boost::algorithm::trim_copy(host);
+    if (const size_t scheme = address.find("://"); scheme != std::string::npos)
+        address.erase(0, scheme + 3);
+    address = address.substr(0, address.find_first_of("/?#"));
+    if (!address.empty() && address.front() == '[') {
+        // [IPv6]:port
+        const size_t end = address.find(']');
+        address = end == std::string::npos ? std::string() : address.substr(0, end + 1);
+    } else if (std::count(address.begin(), address.end(), ':') == 1) {
+        address.erase(address.find(':'));
+    } else if (address.find(':') != std::string::npos) {
+        // A bare IPv6 address has no port, but needs brackets inside a URL
+        address = "[" + address + "]";
+    }
+    if (address.empty())
+        return {};
+    return boost::algorithm::replace_all_copy(url, placeholder, address);
+}
+
+CameraStreamMode MoonrakerPrinterAgent::camera_stream_mode(PrinterCameraType type, const std::string& url)
+{
+    if (url.empty())
+        return CameraStreamMode::none;
+    switch (type) {
+    case pctWebPage: return CameraStreamMode::web_page;
+    case pctSnapshot: return CameraStreamMode::http_snapshot;
+    case pctStream: {
+        const std::string scheme = boost::algorithm::to_lower_copy(url.substr(0, url.find("://")));
+        if (scheme == "http")
+            return CameraStreamMode::http;
+        if (scheme == "https")
+            return CameraStreamMode::https;
+        if (scheme == "rtsp" || scheme == "rtsps")
+            return CameraStreamMode::rtsp;
+        return CameraStreamMode::none;
+    }
+    case pctNone:
+    default: return CameraStreamMode::none;
+    }
+}
+
+std::string MoonrakerPrinterAgent::get_camera_url() const
+{
+    const CameraSettings settings = camera_settings();
+    if (settings.type == pctNone)
+        return {};
+    std::string host;
+    {
+        std::lock_guard<std::recursive_mutex> lock(state_mutex);
+        host = device_info.dev_ip;
+    }
+    return resolve_camera_url(settings.url_template, host);
+}
+
+CameraStreamMode MoonrakerPrinterAgent::get_camera_stream_mode() const
+{
+    const CameraSettings settings = camera_settings();
+    if (settings.type == pctNone)
+        return CameraStreamMode::none;
+    return camera_stream_mode(settings.type, get_camera_url());
 }
 
 int MoonrakerPrinterAgent::start_sdcard_print(PrintParams params, OnUpdateStatusFn update_fn, WasCancelledFn cancel_fn)

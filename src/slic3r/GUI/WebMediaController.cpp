@@ -75,6 +75,7 @@ void WebMediaController::Play()
         // Load MJPEG streams as the top-level document.  Some embedded WebView
         // backends buffer a multipart stream when it is used as an <img> resource,
         // which introduces noticeable live-view latency.
+        // A web_page camera is loaded the same way, so the printer's page runs its own player.
         m_webview->LoadURL(url);
     }
 }

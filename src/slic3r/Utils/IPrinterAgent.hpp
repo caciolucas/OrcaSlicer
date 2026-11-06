@@ -65,7 +65,8 @@ enum class CameraStreamMode {
     https, // LAN or Cloud over TLS
     rtsp,  // LAN only
     webrtc, // Cloud only
-    http_snapshot // HTTP endpoint returning one image per request
+    http_snapshot, // HTTP endpoint returning one image per request
+    web_page       // Printer-hosted page that shows the camera itself (e.g. a WebRTC player), loaded in a webview
 };
 
 /**
@@ -473,7 +474,7 @@ public:
 
     /**
      * Get the current camera stream URL for this agent's active machine.
-     * Only meaningful when get_camera_stream_mode() returns an HTTP, HTTPS, or RTSP mode.
+     * Only meaningful when get_camera_stream_mode() returns an HTTP, HTTPS, RTSP, HTTP snapshot or web page mode.
      */
     virtual std::string get_camera_url() const { return {}; }
 };

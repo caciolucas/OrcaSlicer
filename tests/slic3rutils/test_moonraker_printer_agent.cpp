@@ -48,6 +48,7 @@
 #include <miniz.h>
 #include <nlohmann/json.hpp>
 
+#include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/miniz_extension.hpp"
 #include "slic3r/GUI/DeviceCore/DevStorage.h"
 #include "slic3r/Utils/IPrinterAgent.hpp"
@@ -1076,4 +1077,94 @@ TEST_CASE("A file that is not a 3MF is uploaded as it is, named after the job wh
     CHECK(upload.find("filename=\"" + file_name + "\"") != std::string::npos);
     CHECK(upload.find("; plain G-code") != std::string::npos);
     CHECK(std::distance(boost::filesystem::directory_iterator(dir.path()), boost::filesystem::directory_iterator()) == 1);
+}
+
+namespace {
+
+// An agent connected to `host` whose printer settings hold the given camera options
+class CameraAgent : public MoonrakerPrinterAgent
+{
+public:
+    CameraAgent(PrinterCameraType type, std::string url_template, std::string host) : MoonrakerPrinterAgent("")
+    {
+        settings.type         = type;
+        settings.url_template = std::move(url_template);
+        device_info.dev_ip    = std::move(host);
+    }
+    CameraSettings settings;
+
+protected:
+    CameraSettings camera_settings() const override { return settings; }
+};
+
+} // namespace
+
+TEST_CASE("The camera URL template gets the printer's address without its port", "[MoonrakerPrinterAgent][Camera]")
+{
+    const auto [host, expected] = GENERATE(table<std::string, std::string>({
+        {"192.168.1.20", "http://192.168.1.20:8000/"},
+        {"192.168.1.20:7125", "http://192.168.1.20:8000/"},
+        {"http://192.168.1.20:7125/", "http://192.168.1.20:8000/"},
+        {"printer.local", "http://printer.local:8000/"},
+        {"[fe80::1]:7125", "http://[fe80::1]:8000/"},
+        {"fe80::1", "http://[fe80::1]:8000/"},
+    }));
+    CAPTURE(host);
+    CHECK(MoonrakerPrinterAgent::resolve_camera_url("http://{host}:8000/", host) == expected);
+}
+
+TEST_CASE("A camera URL resolves to nothing when it is empty or has no host to fill in", "[MoonrakerPrinterAgent][Camera]")
+{
+    CHECK(MoonrakerPrinterAgent::resolve_camera_url("", "192.168.1.20").empty());
+    CHECK(MoonrakerPrinterAgent::resolve_camera_url("   ", "192.168.1.20").empty());
+    CHECK(MoonrakerPrinterAgent::resolve_camera_url("http://{host}:8000/", "").empty());
+    // A URL without the placeholder is used as typed, with or without a connected printer
+    CHECK(MoonrakerPrinterAgent::resolve_camera_url("http://10.0.0.5/webcam/?action=stream", "") == "http://10.0.0.5/webcam/?action=stream");
+}
+
+TEST_CASE("Each camera type plays in its own stream mode", "[MoonrakerPrinterAgent][Camera]")
+{
+    using Mode = CameraStreamMode;
+    const auto [type, url, expected] = GENERATE(table<PrinterCameraType, std::string, Mode>({
+        {pctNone, "http://192.168.1.20:8000/", Mode::none},
+        {pctWebPage, "http://192.168.1.20:8000/", Mode::web_page},
+        {pctSnapshot, "http://192.168.1.20/webcam/?action=snapshot", Mode::http_snapshot},
+        {pctStream, "http://192.168.1.20/webcam/?action=stream", Mode::http},
+        {pctStream, "HTTPS://192.168.1.20/webcam/?action=stream", Mode::https},
+        {pctStream, "rtsp://192.168.1.20:554/live", Mode::rtsp},
+        {pctStream, "ftp://192.168.1.20/stream", Mode::none},
+        {pctWebPage, "", Mode::none},
+        {pctStream, "", Mode::none},
+    }));
+    CAPTURE(int(type), url);
+    CHECK(MoonrakerPrinterAgent::camera_stream_mode(type, url) == expected);
+}
+
+TEST_CASE("The agent shows no camera unless its printer settings name one", "[MoonrakerPrinterAgent][Camera]")
+{
+    SECTION("Type none")
+    {
+        CameraAgent agent(pctNone, "http://{host}:8000/", "192.168.1.20");
+        CHECK(agent.get_camera_stream_mode() == CameraStreamMode::none);
+        CHECK(agent.get_camera_url().empty());
+    }
+    SECTION("Empty URL")
+    {
+        CameraAgent agent(pctWebPage, "", "192.168.1.20");
+        CHECK(agent.get_camera_stream_mode() == CameraStreamMode::none);
+        CHECK(agent.get_camera_url().empty());
+    }
+    SECTION("No connected printer")
+    {
+        CameraAgent agent(pctWebPage, "http://{host}:8000/", "");
+        CHECK(agent.get_camera_stream_mode() == CameraStreamMode::none);
+        CHECK(agent.get_camera_url().empty());
+    }
+}
+
+TEST_CASE("The agent opens a web page camera at the connected printer's address", "[MoonrakerPrinterAgent][Camera]")
+{
+    CameraAgent agent(pctWebPage, "http://{host}:8000/", "192.168.1.20");
+    CHECK(agent.get_camera_stream_mode() == CameraStreamMode::web_page);
+    CHECK(agent.get_camera_url() == "http://192.168.1.20:8000/");
 }

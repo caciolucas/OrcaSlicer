@@ -34,6 +34,7 @@ void PrinterAgentPluginCapability::RegisterBindings(pybind11::module_& module)
         .value("HTTPS", CameraStreamMode::https)
         .value("HTTP_SNAPSHOT", CameraStreamMode::http_snapshot)
         .value("RTSP", CameraStreamMode::rtsp)
+        .value("WEB_PAGE", CameraStreamMode::web_page)
         .export_values();
 
     py::class_<AgentInfo>(printer_agent_module, "AgentInfo")

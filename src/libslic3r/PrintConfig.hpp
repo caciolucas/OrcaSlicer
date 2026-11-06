@@ -124,6 +124,11 @@ enum AuthorizationType {
     atKeyPassword, atUserPassword
 };
 
+// How the Device tab shows the camera of a printer whose agent reads it from the printer settings
+enum PrinterCameraType {
+    pctNone, pctWebPage, pctSnapshot, pctStream
+};
+
 enum InfillPattern : int {
     ipMonotonic, ipMonotonicLine,
     ipRectilinear, ipAlignedRectilinear, ipZigZag, ipCrossZag, ipLockedZag,
@@ -827,6 +832,7 @@ CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(GCodeThumbnailsFormat)
 CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(CounterboreHoleBridgingOption)
 CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(PrintHostType)
 CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(AuthorizationType)
+CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(PrinterCameraType)
 CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(WipeTowerWallType)
 CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(PerimeterGeneratorType)
 CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(ToolChangeOrderingType)

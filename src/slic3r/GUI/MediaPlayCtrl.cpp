@@ -207,6 +207,7 @@ void MediaPlayCtrl::set_active_media_controller(CameraStreamMode mode)
 {
     switch (mode) {
     case CameraStreamMode::http_snapshot:
+    case CameraStreamMode::web_page:
         if (auto *web_ctrl = dynamic_cast<WebMediaController *>(m_web_ctrl))
             web_ctrl->set_mode(mode);
         m_active_media_controller = m_web_ctrl;
@@ -248,7 +249,8 @@ void MediaPlayCtrl::SetMachineObject(MachineObject* obj)
     set_active_media_controller(mode);
 
     const bool uses_local_camera_url = mode == CameraStreamMode::http || mode == CameraStreamMode::https ||
-                                       mode == CameraStreamMode::http_snapshot || mode == CameraStreamMode::rtsp;
+                                       mode == CameraStreamMode::http_snapshot || mode == CameraStreamMode::rtsp ||
+                                       mode == CameraStreamMode::web_page;
     const bool uses_webrtc = mode == CameraStreamMode::webrtc;
     const std::string machine = obj ? obj->get_dev_id() : "";
     bool changed = false;
@@ -398,9 +400,10 @@ void MediaPlayCtrl::Play()
 
     if (!is_bbl) {
         const bool is_webrtc = mode == CameraStreamMode::webrtc;
-        const bool is_snapshot = mode == CameraStreamMode::http_snapshot;
+        // Both play in the webview, which gives no state events: mark them playing once loaded.
+        const bool is_webview = mode == CameraStreamMode::http_snapshot || mode == CameraStreamMode::web_page;
         const bool is_http_stream = mode == CameraStreamMode::http || mode == CameraStreamMode::https || mode == CameraStreamMode::rtsp;
-        if (!is_webrtc && !is_snapshot && !is_http_stream)
+        if (!is_webrtc && !is_webview && !is_http_stream)
             return;
 
         auto *webrtc_ctrl = is_webrtc ? dynamic_cast<WebRtcMediaController *>(m_active_media_controller) : nullptr;
@@ -430,7 +433,7 @@ void MediaPlayCtrl::Play()
             m_media_ctrl->BeginExternalStream();
             m_last_state = MEDIASTATE_INITIALIZING;
             SetStatus(_L("Initializing..."), false);
-        } else if (is_snapshot) {
+        } else if (is_webview) {
             m_last_state = wxMEDIASTATE_PLAYING;
             SetStatus(_L("Playing..."), false);
         }
@@ -594,10 +597,12 @@ void MediaPlayCtrl::Stop(wxString const &msg, wxString const &msg2)
     switch (m_last_mode) {
     case CameraStreamMode::http:
     case CameraStreamMode::https:
-    case CameraStreamMode::http_snapshot: {
-        const bool snapshot = m_last_mode == CameraStreamMode::http_snapshot;
+    case CameraStreamMode::http_snapshot:
+    case CameraStreamMode::web_page: {
+        // Webview modes stop on this thread, so the page is unloaded before the user can reopen it.
+        const bool in_webview = m_last_mode == CameraStreamMode::http_snapshot || m_last_mode == CameraStreamMode::web_page;
         if (m_last_state != MEDIASTATE_IDLE) {
-            if (snapshot) {
+            if (in_webview) {
                 if (m_active_media_controller)
                     m_active_media_controller->Stop();
             } else {

@@ -221,6 +221,14 @@ static t_config_enum_values s_keys_map_AuthorizationType {
 };
 CONFIG_OPTION_ENUM_DEFINE_STATIC_MAPS(AuthorizationType)
 
+static t_config_enum_values s_keys_map_PrinterCameraType {
+    { "none",           pctNone },
+    { "web_page",       pctWebPage },
+    { "snapshot",       pctSnapshot },
+    { "stream",         pctStream }
+};
+CONFIG_OPTION_ENUM_DEFINE_STATIC_MAPS(PrinterCameraType)
+
 static t_config_enum_values s_keys_map_GCodeFlavor {
     { "marlin",         gcfMarlinLegacy },
     { "klipper",        gcfKlipper },
@@ -1214,6 +1222,35 @@ void PrintConfigDef::init_common_params()
     def = this->add("print_host_webui", coString);
     def->label = L("Device UI");
     def->tooltip = L("Specify the URL of your device user interface if it's not same as print_host.");
+    def->mode = comAdvanced;
+    def->cli = ConfigOptionDef::nocli;
+    def->set_default_value(new ConfigOptionString());
+
+    def = this->add("printer_camera_type", coEnum);
+    def->label = L("Camera type");
+    def->tooltip = L("How the Device tab shows the printer's camera, for printer agents that support it. "
+                     "Web page: a page served by the printer that plays the camera itself. "
+                     "Snapshot: a URL that returns one image per request. "
+                     "Stream: an MJPEG (http/https) or RTSP stream.");
+    def->enum_keys_map = &ConfigOptionEnum<PrinterCameraType>::get_enum_values();
+    def->enum_values.push_back("none");
+    def->enum_values.push_back("web_page");
+    def->enum_values.push_back("snapshot");
+    def->enum_values.push_back("stream");
+    def->enum_labels.push_back(L("None"));
+    def->enum_labels.push_back(L("Web page"));
+    def->enum_labels.push_back(L("Snapshot"));
+    def->enum_labels.push_back(L("Stream"));
+    def->mode = comAdvanced;
+    def->cli = ConfigOptionDef::nocli;
+    def->set_default_value(new ConfigOptionEnum<PrinterCameraType>(pctNone));
+
+    def = this->add("printer_camera_url", coString);
+    def->label = L("Camera URL");
+    // TRN: {host} is a placeholder the user types literally; keep it untranslated.
+    // xgettext:no-url-check
+    def->tooltip = L("URL of the printer's camera. {host} is replaced with the printer's address without its port, "
+                     "e.g. http://{host}:8000/");
     def->mode = comAdvanced;
     def->cli = ConfigOptionDef::nocli;
     def->set_default_value(new ConfigOptionString());

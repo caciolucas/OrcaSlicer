@@ -124,3 +124,27 @@ TEST_CASE("Web media controller tears down a snapshot lifecycle", "[WebMediaCont
     controller.Play();
     CHECK(view.page.find("http://camera.example/frame.jpg") == std::string::npos);
 }
+
+TEST_CASE("Web media controller opens a camera web page and leaves it on stop", "[WebMediaController][integration]")
+{
+    StubWebView         view;
+    WebMediaController  controller(&view);
+
+    controller.set_mode(CameraStreamMode::web_page);
+    controller.Load(wxURI("http://192.168.1.20:8000/"));
+    controller.Play();
+
+    // The page is the top-level document, so its own scripts can open the camera connection.
+    REQUIRE(view.events.size() == 3);
+    CHECK(view.events[2] == "url");
+    CHECK(view.loaded_url == "http://192.168.1.20:8000/");
+
+    controller.Stop();
+
+    // Navigating away unloads the page, which closes its connection to a camera that may accept only one.
+    REQUIRE(view.events.size() == 7);
+    CHECK(view.events[4] == "stop");
+    CHECK(view.events[5] == "page");
+    CHECK(view.page.empty());
+    CHECK(view.page_base == "about:blank");
+}

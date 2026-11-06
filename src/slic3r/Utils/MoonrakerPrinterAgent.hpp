@@ -3,6 +3,7 @@
 
 #include "IPrinterAgent.hpp"
 #include "bambu_networking.hpp"
+#include "libslic3r/PrintConfig.hpp"
 
 #include <functional>
 #include <chrono>
@@ -71,6 +72,15 @@ public:
     FilamentSyncMode get_filament_sync_mode() const override { return FilamentSyncMode::pull; }
     bool fetch_filament_info(std::string dev_id, FilamentSyncMode sync_mode = FilamentSyncMode::pull) override;
 
+    // Camera, set by the printer's printer_camera_type and printer_camera_url options
+    CameraStreamMode get_camera_stream_mode() const override;
+    std::string      get_camera_url() const override;
+    // Replaces {host} in url_template with host stripped of any scheme, port and path. Empty when the
+    // template is empty, or names {host} and there is no host to put there.
+    static std::string resolve_camera_url(const std::string& url_template, const std::string& host);
+    // The stream mode a camera type plays its resolved URL in; a stream picks it from the URL's scheme
+    static CameraStreamMode camera_stream_mode(PrinterCameraType type, const std::string& url);
+
     // JSON helper methods
     static std::string safe_json_string(const nlohmann::json& obj, const char* key);
     static int safe_json_int(const nlohmann::json& obj, const char* key);
@@ -135,6 +145,13 @@ protected:
     virtual bool print_uploaded_file(const PrintParams& params, const std::string& filename);
     // Whether the printer prints a .gcode.3mf bundle as is (its use_3mf option)
     virtual bool accepts_3mf() const;
+    struct CameraSettings
+    {
+        PrinterCameraType type = pctNone;
+        std::string       url_template;
+    };
+    // The printer's camera options
+    virtual CameraSettings camera_settings() const;
     void start_status_stream(const std::string& dev_id, const std::string& base_url, const std::string& api_key);
     void stop_status_stream();
 
