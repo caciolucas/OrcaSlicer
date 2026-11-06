@@ -656,6 +656,45 @@ TEST_CASE("Moonraker discovery waits for a complete device identity", "[Moonrake
     REQUIRE(announcement.at("dev_name") == "Test model");
 }
 
+TEST_CASE("Moonraker discovery announces the printer's address with the port it connected on", "[MoonrakerPrinterAgent][Discovery]")
+{
+    // The Device tab saves the announced address, and the next connection reads its port from there
+    DiscoveryAgent agent("");
+    nlohmann::json announcement;
+    agent.set_on_ssdp_msg_fn([&](std::string payload) { announcement = nlohmann::json::parse(payload); });
+
+    agent.device_info.dev_id   = "192.168.1.121:7125";
+    agent.device_info.dev_ip   = "192.168.1.121";
+    agent.device_info.base_url = "http://192.168.1.121:7125";
+    agent.start_discovery(true, false);
+
+    REQUIRE(announcement.contains("dev_ip"));
+    CHECK(announcement.at("dev_ip") == "192.168.1.121:7125");
+    CHECK(announcement.at("dev_id") == "192.168.1.121:7125");
+}
+
+TEST_CASE("A device saved without its port gets it back from the printer settings or its id", "[MoonrakerPrinterAgent][Connect]")
+{
+    using Agent = MoonrakerPrinterAgent;
+    // A port the connection already has is kept
+    CHECK(Agent::resolve_device_port("192.168.1.121", "7125", "192.168.1.121:7125", "http://192.168.1.121:80") == "7125");
+    // print_host names the port for the same host
+    CHECK(Agent::resolve_device_port("192.168.1.121", "", "192.168.1.121", "http://192.168.1.121:7125/") == "7125");
+    // Otherwise the id, which was built from host and port, does
+    CHECK(Agent::resolve_device_port("192.168.1.121", "", "192.168.1.121:7125", "") == "7125");
+    CHECK(Agent::resolve_device_port("192.168.1.121", "", "192.168.1.121:7125", "http://192.168.1.121") == "7125");
+    // Neither another host's port nor an address without one is used
+    CHECK(Agent::resolve_device_port("192.168.1.121", "", "192.168.1.50:7125", "http://192.168.1.50:7125").empty());
+    CHECK(Agent::resolve_device_port("192.168.1.121", "", "192.168.1.121", "http://192.168.1.121").empty());
+}
+
+TEST_CASE("The saved device address is the connection URL without its scheme", "[MoonrakerPrinterAgent][Connect]")
+{
+    CHECK(MoonrakerPrinterAgent::device_address("http://192.168.1.121:7125") == "192.168.1.121:7125");
+    CHECK(MoonrakerPrinterAgent::device_address("https://printer.local:7130") == "printer.local:7130");
+    CHECK(MoonrakerPrinterAgent::device_address("http://192.168.1.121") == "192.168.1.121");
+}
+
 TEST_CASE("Stopping the status stream gives a silent printer no more than its timeouts", "[MoonrakerPrinterAgent][StatusStream]")
 {
     // An open websocket gets the 200 ms close timeout, and a stalled object list request up to 1 s of curl progress to see the stop.

@@ -1400,7 +1400,10 @@ bool MoonrakerPrinterAgent::init_device_info(const std::string& dev_id, const st
     device_info.api_key    = password;
     device_info.model_name = printer_cfg.opt_string("printer_model");
     device_info.model_id   = preset.get_printer_type(preset_bundle);
-    device_info.base_url   = normalize_base_url(use_ssl, dev_ip, port);
+    const std::string device_port = resolve_device_port(dev_ip, port, dev_id, printer_cfg.opt_string("print_host"));
+    if (device_port != port)
+        BOOST_LOG_TRIVIAL(info) << "MoonrakerPrinterAgent: using port " << device_port << " for " << dev_id << ", whose address has none";
+    device_info.base_url   = normalize_base_url(use_ssl, dev_ip, device_port);
     device_info.dev_id     = dev_id;
     device_info.version    = "";
     device_info.dev_name   = device_info.dev_id;
@@ -1671,7 +1674,8 @@ void MoonrakerPrinterAgent::announce_printhost_device()
     nlohmann::json payload;
     payload["dev_name"]     = dev_name;
     payload["dev_id"]       = device_info.dev_id;
-    payload["dev_ip"]       = device_info.dev_ip;
+    // The Device tab saves this as the printer's address, so it keeps the port the connection used
+    payload["dev_ip"]       = device_address(device_info.base_url);
     payload["dev_type"]     = model_id.empty() ? dev_name : model_id;
     payload["dev_signal"]   = "0";
     payload["connect_type"] = "lan";
@@ -2635,6 +2639,32 @@ void MoonrakerPrinterAgent::perform_connection_async(const std::string& dev_id, 
 bool MoonrakerPrinterAgent::is_numeric(const std::string& value)
 {
     return !value.empty() && std::all_of(value.begin(), value.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+}
+
+std::string MoonrakerPrinterAgent::resolve_device_port(const std::string& host,
+                                                       const std::string& port,
+                                                       const std::string& dev_id,
+                                                       const std::string& print_host)
+{
+    if (!port.empty() || host.empty())
+        return port;
+    for (const std::string* address : {&print_host, &dev_id}) {
+        if (address->empty())
+            continue;
+        std::string address_port;
+        const std::string address_host = Http::get_host_from_url(*address, &address_port);
+        if (!address_port.empty() && boost::iequals(address_host, host))
+            return address_port;
+    }
+    return port;
+}
+
+std::string MoonrakerPrinterAgent::device_address(const std::string& base_url)
+{
+    std::string address = base_url;
+    if (const size_t scheme = address.find("://"); scheme != std::string::npos)
+        address.erase(0, scheme + 3);
+    return address.substr(0, address.find('/'));
 }
 
 std::string MoonrakerPrinterAgent::normalize_base_url(bool use_ssl, const std::string& host, const std::string& port)

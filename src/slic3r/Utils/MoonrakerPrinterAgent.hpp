@@ -87,6 +87,13 @@ public:
     static std::string safe_array_string(const nlohmann::json& arr, int idx);
     static int safe_array_int(const nlohmann::json& arr, int idx);
 
+    // The port to reach host on: port when set, else the one print_host or dev_id gives for that same host,
+    // so a device saved without its port still reaches Moonraker rather than port 80
+    static std::string resolve_device_port(const std::string& host, const std::string& port, const std::string& dev_id,
+                                           const std::string& print_host);
+    // The address the Device tab saves for the printer: base_url without its scheme or path, port included
+    static std::string device_address(const std::string& base_url);
+
 protected:
     struct MoonrakerDeviceInfo
     {
