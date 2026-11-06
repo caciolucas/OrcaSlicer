@@ -4,6 +4,7 @@
 #include <slic3r/Utils/IPrinterAgent.hpp>
 
 #include <string>
+#include <wx/string.h>
 #include <wx/uri.h>
 
 class wxWebView;
@@ -24,6 +25,9 @@ public:
     void Stop() override;
 
 private:
+    // Fits a web_page camera's video to the view once the printer's page has loaded
+    void on_page_loaded(const wxString& url);
+
     wxWebView* m_webview = nullptr;
     std::string m_url;
     CameraStreamMode m_stream_mode = CameraStreamMode::http;

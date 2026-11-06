@@ -148,3 +148,55 @@ TEST_CASE("Web media controller opens a camera web page and leaves it on stop", 
     CHECK(view.page.empty());
     CHECK(view.page_base == "about:blank");
 }
+
+namespace {
+
+void send_page_loaded(StubWebView& view, const wxString& url)
+{
+    wxWebViewEvent loaded(wxEVT_WEBVIEW_LOADED, view.GetId(), url, "");
+    view.ProcessEvent(loaded);
+}
+
+} // namespace
+
+TEST_CASE("Web media controller fits a camera web page's video each time the page loads", "[WebMediaController][integration]")
+{
+    StubWebView         view;
+    WebMediaController  controller(&view);
+
+    controller.set_mode(CameraStreamMode::web_page);
+    controller.Load(wxURI("http://192.168.1.20:8000/"));
+    controller.Play();
+
+    for (int load = 1; load <= 2; ++load) {
+        CAPTURE(load);
+        const size_t before = view.events.size();
+        view.script.clear();
+        send_page_loaded(view, "http://192.168.1.20:8000/");
+        REQUIRE(view.events.size() == before + 1);
+        CHECK(view.events.back() == "script");
+        CHECK(view.script.find("object-fit:contain") != std::string::npos);
+        CHECK(view.script.find("background:#000") != std::string::npos);
+        CHECK(view.script.find("overflow:hidden") != std::string::npos);
+    }
+
+    // The blank page Stop() leaves is not styled
+    controller.Stop();
+    const size_t stopped = view.events.size();
+    send_page_loaded(view, "about:blank");
+    CHECK(view.events.size() == stopped);
+}
+
+TEST_CASE("Web media controller leaves a snapshot page's layout alone", "[WebMediaController][integration]")
+{
+    StubWebView         view;
+    WebMediaController  controller(&view);
+
+    controller.set_mode(CameraStreamMode::http_snapshot);
+    controller.Load(wxURI("http://camera.example/frame.jpg"));
+    controller.Play();
+
+    const size_t played = view.events.size();
+    send_page_loaded(view, "http://camera.example/frame.jpg");
+    CHECK(view.events.size() == played);
+}

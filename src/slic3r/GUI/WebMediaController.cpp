@@ -18,12 +18,40 @@ void initialize_webview(wxWebView* webview)
     webview->SetPage("<html><head><style>html,body{margin:0;height:100%;background:#000;}</style></head><body></body></html>", "");
 }
 
+// The printer's page sizes its <video> itself and leaves the background transparent, which shows white bands
+// around it. Adds a stylesheet once per document, so a page that loads again gets it again.
+const char* const fit_camera_page_script =
+    "(function(){"
+    "if(document.getElementById('orca-camera-fit'))return;"
+    "var style=document.createElement('style');"
+    "style.id='orca-camera-fit';"
+    "style.textContent='html,body{margin:0!important;padding:0!important;width:100%!important;height:100%!important;"
+    "overflow:hidden!important;background:#000!important;}"
+    "video{position:fixed!important;top:0!important;left:0!important;width:100%!important;height:100%!important;"
+    "max-width:none!important;max-height:none!important;object-fit:contain!important;background:#000!important;}';"
+    "(document.head||document.documentElement).appendChild(style);"
+    "})();";
+
 } // namespace
 
 WebMediaController::WebMediaController(wxWebView* webview)
     : m_webview(webview)
 {
     initialize_webview(m_webview);
+    // why: no Unbind - StatusBasePanel destroys the webview before this controller, so no event outlives it
+    if (m_webview)
+        m_webview->Bind(wxEVT_WEBVIEW_LOADED, [this](wxWebViewEvent& evt) {
+            evt.Skip();
+            on_page_loaded(evt.GetURL());
+        });
+}
+
+void WebMediaController::on_page_loaded(const wxString& url)
+{
+    // Only the camera page: not a snapshot or stream document, nor the blank page Stop() leaves
+    if (m_stream_mode != CameraStreamMode::web_page || m_url.empty() || url.StartsWith("about:"))
+        return;
+    m_webview->RunScript(fit_camera_page_script);
 }
 
 void WebMediaController::Load(wxURI url)
