@@ -88,6 +88,8 @@ private:
 
     CameraStreamMode current_mode() const;
     void set_active_media_controller(CameraStreamMode mode);
+    // Starts a web page camera once it can play, unless the user stopped it
+    void autoplay_web_page(CameraStreamMode mode);
 
 private:
     static inline const wxMediaState MEDIASTATE_IDLE = static_cast<wxMediaState>(3);

@@ -324,8 +324,10 @@ void MediaPlayCtrl::SetMachineObject(MachineObject* obj)
     }
 
     m_machine = machine;
-    if (!changed)
+    if (!changed) {
+        autoplay_web_page(mode);
         return;
+    }
 
     // A genuine target switch is not a stream failure and should clear the
     // manual-stop state before the new target is allowed to play.
@@ -729,6 +731,18 @@ void MediaPlayCtrl::on_webrtc_status(WebRtcMediaController::Status status)
     }
     // Status::Stopped needs no action: a genuine failure arrives as Failed, and
     // a stop we initiated is already handled by Stop() itself.
+}
+
+void MediaPlayCtrl::autoplay_web_page(CameraStreamMode mode)
+{
+    // why: a web page camera opens nothing until it is shown, and leaving the tab stops it (on_show_hide), so
+    // it resumes on its own when the tab is shown again. A stop from the play button sets m_web_user_stopped,
+    // which keeps it stopped until the user plays it or the printer changes. Other modes keep their manual start.
+    if (mode != CameraStreamMode::web_page || m_web_user_stopped || m_last_state != MEDIASTATE_IDLE || !m_camera_exists ||
+        m_url.IsEmpty() || !IsEnabled() || !IsShownOnScreen())
+        return;
+    BOOST_LOG_TRIVIAL(info) << "MediaPlayCtrl: autoplay web page camera";
+    Play();
 }
 
 void MediaPlayCtrl::TogglePlay()
