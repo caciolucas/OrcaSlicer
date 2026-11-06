@@ -175,6 +175,8 @@
 	"prime_tower_position_type": "Left Upper",
 	"print_host": "http://172.23.209.71:4408/",
 	"print_host_webui": "http://172.23.209.71:4408/",
+	"printer_camera_type": "web_page",
+	"printer_camera_url": "http://{host}:8000/",
 	"printer_technology": "FFF",
 	"printhost_authorization_type": "key",
 	"printhost_ssl_ignore_revoke": "0",
