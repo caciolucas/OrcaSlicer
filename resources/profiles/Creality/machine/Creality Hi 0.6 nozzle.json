@@ -163,7 +163,7 @@
 	"high_current_on_filament_swap": "0",
 	"host_type": "octoprint",
 	"printer_agent": "crealityprint",
-	"layer_change_gcode": ";AFTER_LAYER_CHANGE\n;[layer_z]",
+	"layer_change_gcode": "SET_PRINT_STATS_INFO CURRENT_LAYER={layer_num + 1} TOTAL_LAYER={total_layer_count}\n;AFTER_LAYER_CHANGE\n;[layer_z]",
 	"machine_LED_light_exist": "1",
 	"machine_min_extruding_rate": "0,0",
 	"machine_min_travel_rate": "0,0",
