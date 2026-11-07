@@ -7,6 +7,7 @@
 #include "libslic3r/PresetBundle.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "slic3r/Utils/CrealityCfs.hpp"
+#include "slic3r/Utils/CrealityPrint.hpp"
 #include "slic3r/Utils/CrealityPrintAgent.hpp"
 
 using namespace Slic3r;
@@ -197,6 +198,47 @@ TEST_CASE("A CFS spool that names a subtype gets that subtype", "[CFS][Creality]
 {
     CHECK(match(k2_stock_nozzle, "Creality", "Generic PLA Silk", "PLA") == "PLA-SILK");
     CHECK(match(k2_stock_nozzle, "Creality", "Generic PLA Matte", "PLA") == "PLA-MATTE");
+}
+
+TEST_CASE("The Creality Hi reads its CFS slots", "[CFS][Creality]")
+{
+    CHECK(CrealityPrint::model_supports_multi_color("F018"));
+    CHECK(CrealityPrint::model_display_name("F018") == "Hi");
+}
+
+// The reply of a Creality Hi with a CFS. Box 0 is the spool holder, which reports nothing here.
+TEST_CASE("A Creality Hi spool keeps its vendor and name", "[CFS][Creality]")
+{
+    const std::string response = R"({"boxsInfo":{"materialBoxs":[
+        {"id":0,"state":0,"type":1,"materials":[
+            {"id":0,"vendor":"","type":"","color":"","name":"","rfid":"","state":1}]},
+        {"id":1,"state":1,"type":0,"materials":[
+            {"id":0,"vendor":"Creality","type":"PETG","name":"Hyper PETG","rfid":"06002","color":"#0ffffff","state":1},
+            {"id":3,"vendor":"Creality","type":"PLA","name":"Hyper PLA","rfid":"01001","color":"#0f4e076","state":1}]}
+    ]}})";
+
+    std::vector<CrealityPrintAgent::CFSSlot> slots;
+    int                                      box_count = 0;
+    std::string                              error;
+    REQUIRE(CrealityPrintAgent::parse_cfs_response(response, slots, box_count, error));
+    CHECK(box_count == 1);
+    REQUIRE(slots.size() == 2);
+    CHECK(slots[0].box_id == 0);
+    CHECK(slots[0].slot_id == 0);
+    CHECK(slots[0].vendor == "Creality");
+    CHECK(slots[0].brand_name == "Hyper PETG");
+    CHECK(slots[0].color_hex == "#ffffff");
+    CHECK(slots[1].slot_id == 3);
+    CHECK(slots[1].brand_name == "Hyper PLA");
+
+    const std::vector<FilamentSpec> hi_presets{
+        {"Generic PETG @Hi-all", "PETG-GENERIC", "PETG"},
+        {"Generic PLA @Hi-all",  "PLA-GENERIC",  "PLA"},
+        {"Hyper PETG @Hi-all",   "PETG-HYPER",   "PETG"},
+        {"Hyper PLA @Hi-all",    "PLA-HYPER",    "PLA"},
+    };
+    CHECK(match(hi_presets, slots[0].vendor, slots[0].brand_name, slots[0].filament_type) == "PETG-HYPER");
+    CHECK(match(hi_presets, slots[1].vendor, slots[1].brand_name, slots[1].filament_type) == "PLA-HYPER");
 }
 
 // Orca: a third party spool matches no preset by brand or vendor, so it falls back to the first

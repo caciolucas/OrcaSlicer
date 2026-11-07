@@ -4521,8 +4521,12 @@ void GUI_App::select_machine(const std::string& agent_id)
 
     // If machine doesn't exist, create it first. The Orca agent never connects, so an entry saved
     // under it holds no binding; re-insert it for the active agent, whose machine list can't see
-    // it otherwise. Entries bound by any other agent stay with that agent.
-    if (!existing || (existing->printer_agent_id == ORCA_PRINTER_AGENT_ID && agent_id != ORCA_PRINTER_AGENT_ID)) {
+    // it otherwise. So is a Moonraker entry under the CrealityPrint agent, which talks to the same
+    // printer through Moonraker: a printer profile moving to that agent keeps its printer. Entries
+    // bound by any other agent stay with that agent.
+    const bool moonraker_to_creality = existing && existing->printer_agent_id == MOONRAKER_PRINTER_AGENT_ID &&
+                                       agent_id == CREALITY_PRINT_AGENT_ID;
+    if (!existing || moonraker_to_creality || (existing->printer_agent_id == ORCA_PRINTER_AGENT_ID && agent_id != ORCA_PRINTER_AGENT_ID)) {
         BBLocalMachine machine;
         machine.dev_id = dev_id;
         // We use dev_id as dev_ip to store the address (host:port)

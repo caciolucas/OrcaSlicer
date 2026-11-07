@@ -1,6 +1,8 @@
 #include "CrealityPrintAgent.hpp"
 #include "CrealityPrint.hpp"
+#include "Http.hpp"
 #include "MoonrakerPrinterAgent.hpp"
+#include "NetworkAgentFactory.hpp"
 #include "IPrinterAgent.hpp"
 #include "libslic3r/PresetBundle.hpp"
 #include "libslic3r/PrintConfig.hpp"
@@ -187,7 +189,7 @@ CrealityPrintAgent::CrealityPrintAgent(std::string log_dir)
 AgentInfo CrealityPrintAgent::get_agent_info_static()
 {
     return AgentInfo{
-        "crealityprint",
+        CREALITY_PRINT_AGENT_ID,
         "CrealityPrint",
         CrealityPrintAgent_VERSION,
         "Creality K-series printer agent (CFS-aware filament sync)"
@@ -305,8 +307,9 @@ bool CrealityPrintAgent::fetch_filament_info(std::string dev_id, FilamentSyncMod
 
     // Build a CrealityPrint helper so we can use its model detection + WS helpers
     // (added in upstream PR #13291).
+    // why: the address may carry Moonraker's port, while /info and the CFS WebSocket are on the host's own
     DynamicPrintConfig cfg;
-    cfg.set_key_value("print_host",                  new ConfigOptionString("http://" + device_info.dev_ip));
+    cfg.set_key_value("print_host",                  new ConfigOptionString("http://" + Http::get_host_from_url(device_info.dev_ip)));
     cfg.set_key_value("print_host_webui",            new ConfigOptionString(""));
     cfg.set_key_value("printhost_cafile",            new ConfigOptionString(""));
     cfg.set_key_value("printhost_port",              new ConfigOptionString(""));
