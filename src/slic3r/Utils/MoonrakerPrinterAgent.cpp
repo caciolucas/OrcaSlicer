@@ -2449,14 +2449,23 @@ nlohmann::json MoonrakerPrinterAgent::build_print_payload_locked() const
         payload["print"]["mc_percent"] = mc_percent;
     }
 
-    if (status_cache.contains("print_stats") && status_cache["print_stats"].contains("total_duration") &&
-        status_cache["print_stats"].contains("print_duration") && status_cache["print_stats"]["total_duration"].is_number() &&
+    if (status_cache.contains("print_stats") && status_cache["print_stats"].contains("print_duration") &&
         status_cache["print_stats"]["print_duration"].is_number()) {
-        const double total   = status_cache["print_stats"]["total_duration"].get<double>();
-        const double elapsed = status_cache["print_stats"]["print_duration"].get<double>();
-        if (total > 0.0 && elapsed >= 0.0) {
-            const auto remaining_minutes          = std::max(0, static_cast<int>((total - elapsed) / 60.0));
-            payload["print"]["mc_remaining_time"] = remaining_minutes;
+        // display_status follows the G-code's M73, which tracks time better than the file position
+        double progress = mc_percent >= 0 ? mc_percent / 100.0 : 0.0;
+        if (status_cache.contains("display_status") && status_cache["display_status"].contains("progress") &&
+            status_cache["display_status"]["progress"].is_number())
+            progress = status_cache["display_status"]["progress"].get<double>();
+        payload["print"]["mc_remaining_time"] =
+            remaining_minutes(status_cache["print_stats"]["print_duration"].get<double>(), progress);
+    }
+
+    if (status_cache.contains("print_stats")) {
+        int current_layer = 0;
+        int total_layers  = 0;
+        if (reported_layers(status_cache["print_stats"], current_layer, total_layers)) {
+            payload["print"]["layer_num"]       = current_layer;
+            payload["print"]["total_layer_num"] = total_layers;
         }
     }
 
@@ -2752,6 +2761,27 @@ std::string MoonrakerPrinterAgent::resolve_device_port(const std::string& host,
             return address_port;
     }
     return port;
+}
+
+int MoonrakerPrinterAgent::remaining_minutes(double print_duration, double progress)
+{
+    if (print_duration <= 0.0 || progress <= 0.0 || progress >= 1.0)
+        return 0;
+    return static_cast<int>(print_duration * (1.0 - progress) / progress / 60.0 + 0.5);
+}
+
+bool MoonrakerPrinterAgent::reported_layers(const nlohmann::json& print_stats, int& current_layer, int& total_layers)
+{
+    const auto info = print_stats.find("info");
+    if (info == print_stats.end() || !info->is_object())
+        return false;
+    const auto current = info->find("current_layer");
+    const auto total   = info->find("total_layer");
+    if (current == info->end() || total == info->end() || !current->is_number() || !total->is_number())
+        return false;
+    current_layer = current->get<int>();
+    total_layers  = total->get<int>();
+    return total_layers > 0;
 }
 
 std::string MoonrakerPrinterAgent::device_address(const std::string& base_url)

@@ -94,6 +94,11 @@ public:
     // The address the Device tab saves for the printer: base_url without its scheme or path, port included
     static std::string device_address(const std::string& base_url);
 
+    // Whole minutes left at the rate the print has gone so far, 0 until there is a rate to go by
+    static int remaining_minutes(double print_duration, double progress);
+    // Reads the layers the G-code reported through SET_PRINT_STATS_INFO; false when it reported none
+    static bool reported_layers(const nlohmann::json& print_stats, int& current_layer, int& total_layers);
+
 protected:
     struct MoonrakerDeviceInfo
     {

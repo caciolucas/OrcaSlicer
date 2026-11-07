@@ -1292,3 +1292,34 @@ TEST_CASE("Only a change in the CFS slots asks for the filament system again", "
     agent.update_status({{"print_stats", {{"state", "printing"}}}}, false);
     CHECK_FALSE(agent.box_refresh_requested.load());
 }
+
+// print_stats also counts the time the printer spent heating up, a gap that never shrinks, so the time
+// left has to come from the printed fraction.
+TEST_CASE("Moonraker's time left follows the print's progress", "[Moonraker]")
+{
+    using Agent = Slic3r::MoonrakerPrinterAgent;
+
+    CHECK(Agent::remaining_minutes(68 * 60.0, 0.53) == 60);
+    CHECK(Agent::remaining_minutes(30 * 60.0, 0.5) == 30);
+
+    // Nothing to go by yet, and nothing left
+    CHECK(Agent::remaining_minutes(0.0, 0.0) == 0);
+    CHECK(Agent::remaining_minutes(60.0, 0.0) == 0);
+    CHECK(Agent::remaining_minutes(60 * 60.0, 1.0) == 0);
+}
+
+TEST_CASE("Moonraker reports the layers the G-code set", "[Moonraker]")
+{
+    using Agent = Slic3r::MoonrakerPrinterAgent;
+    int current = -1;
+    int total   = -1;
+
+    REQUIRE(Agent::reported_layers({{"info", {{"current_layer", 12}, {"total_layer", 450}}}}, current, total));
+    CHECK(current == 12);
+    CHECK(total == 450);
+
+    // A file without SET_PRINT_STATS_INFO, as a Creality Hi reports it
+    CHECK_FALSE(Agent::reported_layers({{"info", {{"current_layer", nullptr}, {"total_layer", nullptr}}}}, current, total));
+    CHECK_FALSE(Agent::reported_layers({{"info", {{"current_layer", 0}, {"total_layer", 0}}}}, current, total));
+    CHECK_FALSE(Agent::reported_layers({{"state", "printing"}}, current, total));
+}
